@@ -13,6 +13,18 @@
 
 ---
 
+## 🎯 核心焦点：如何识别“假性硬解成功”？
+
+在排查和测试老旧硬件时，最容易遇到的典型误区是：
+> **`edge://gpu` 显示 `Video Decode: Hardware accelerated`，但实际播放视频时仍然在用 CPU 软解！**
+
+* **修复前（假性硬解）**：`edge://gpu` 虽显示硬件加速，但 `edge://media-internals` 显示 VA-API 首次解码即报错，底层抛出 `"video decoder fallback after initial decode error"`，随后**悄悄降级为 FFmpeg 软解**。
+* **修复后（真正硬解）**：实测 1280×720 / 1920×1080、30 FPS、H.264 视频，**持续播放数分钟后仍稳定显示 `VaapiVideoDecoder` 和 `kIsPlatformVideoDecoder: true`**，零丢帧、零回退。
+
+本项目不仅提供开箱即用的一键修复补丁，更提供一套完整严谨的“真假硬解识别与对照验证体系”。
+
+---
+
 ## 🚀 实测性能对比与双场景分析
 
 测试采用标准 Big Buck Bunny H.264 测试流（120 秒连续播放）。
@@ -91,18 +103,10 @@ export LIBVA_DRIVER_NAME=i965
 export LIBVA_DRIVERS_PATH="$HOME/.local/lib/dri"
 
 # 启动 Microsoft Edge
-/opt/microsoft/msedge/msedge \
-    --enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks \
-    --ignore-gpu-blocklist \
-    --enable-gpu-rasterization \
-    --enable-zero-copy
+/opt/microsoft/msedge/msedge     --enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks     --ignore-gpu-blocklist     --enable-gpu-rasterization     --enable-zero-copy
 
 # 启动 Google Chrome
-/opt/google/chrome/google-chrome \
-    --enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks \
-    --ignore-gpu-blocklist \
-    --enable-gpu-rasterization \
-    --enable-zero-copy
+/opt/google/chrome/google-chrome     --enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks     --ignore-gpu-blocklist     --enable-gpu-rasterization     --enable-zero-copy
 ```
 
 ---
@@ -122,33 +126,173 @@ export LIBVA_DRIVERS_PATH="$HOME/.local/lib/dri"
 
 ---
 
-## ✅ 如何准确验证硬件解码已真实生效？
+## 🔍 如何验证 VA-API 硬件视频解码是否真正生效
 
-### ⚠️ 重要避坑警示：为什么不能只看 `edge://gpu`？
-很多用户会查看 `edge://gpu` 中的 **Video Decode: Hardware accelerated**，并误以为这就是硬解生效的证据。**这是经典误区！**
-* **真相**：`edge://gpu` 仅表示浏览器配置“**允许尝试硬件解码**”。在修复之前，该页面就已经是绿色的 `Hardware accelerated`；
-* **致命回退**：在未打补丁时，当您真正播放视频时，Chromium 会在底层尝试调用 `vaExportSurfaceHandle`，失败后在后台静默抛出错误：`"video decoder fallback after initial decode error"`，并**偷偷降级回 CPU 软解（FFmpegVideoDecoder）**，此时 `edge://gpu` 依然会显示加速！
+> **重要：** `edge://gpu` 显示 `Video Decode: Hardware accelerated`，并不代表当前播放的视频已经使用硬件解码。建议通过 `edge://media-internals` 验证实际解码器。
+
+### 1. 检查浏览器的硬件加速能力
+
+在 Microsoft Edge 地址栏输入：
+```text
+edge://gpu
+```
+找到 **Graphics Feature Status**，重点检查以下项目：
+
+| 项目 | 理想状态 | 作用 |
+| :--- | :--- | :--- |
+| **Video Decode** | **Hardware accelerated** | 视频硬件解码能力已启用 |
+| Compositing | Hardware accelerated | GPU 页面合成 |
+| Canvas | Hardware accelerated | Canvas 图形加速 |
+| Rasterization | Hardware accelerated | GPU 光栅化 |
+| OpenGL | Enabled | OpenGL 功能可用 |
+| WebGL | Hardware accelerated | WebGL 图形加速 |
+
+同时可以检查页面中的 **Video Acceleration Information**，确认 H.264 的 Baseline、Main 或 High Profile 解码能力是否存在。
+
+**注意：** 以上结果只代表浏览器识别到了硬件加速能力，并不保证实际播放视频时会使用 GPU 解码。
 
 ---
 
-### 真正的两大权威黄金判定标准：
+### 2. 确认播放的视频采用 H.264 编码
 
-#### 1. 浏览器内核心态（播放时动态检查）
-在 Edge 播放任意 1080p H.264 视频（如 Bilibili 或 YouTube）时：
-* **方式 A（直观页面）**：在地址栏输入 `edge://media-internals`，在当前活跃的播放器列表中查看：
-  * **`kVideoDecoderName`** 必须是 **`VaapiVideoDecoder`**（若为 `FFmpegVideoDecoder` 则说明退化为软解）；
-  * **`kIsPlatformVideoDecoder`** 必须为 **`true`**；
-  * 列表中**不得出现**任何 `decoder fallback` 警告。
-* **方式 B（开发者工具）**：在播放网页按 `F12` 打开 DevTools -> 切换到 `Media` 面板 -> 点击左侧播放实例 -> 查看 `Decoder Name` 是否为 `VaapiVideoDecoder`。
+在 Edge 中打开 YouTube 视频，建议先选择 720P、30 FPS 进行测试。
+右键视频画面，选择 **Stats for nerds（详细统计信息）**。
+查看 `Codecs`：
 
-#### 2. 硬件芯片物理工作负载（底层铁证）
-在终端中执行显卡硬件监控工具：
-```bash
-sudo intel_gpu_top
+| 编码标识 | 视频格式 | Intel HD Graphics 3000 (Sandy Bridge) |
+| :--- | :--- | :--- |
+| **`avc1`** | **H.264 / AVC** | **✅ 支持硬件解码** |
+| `vp09` | VP9 | ❌ 不支持硬件解码 |
+| `av01` | AV1 | ❌ 不支持硬件解码 |
+
+对于 Intel Sandy Bridge / HD Graphics 3000，必须确保视频流使用 H.264。
+如有必要，可以使用 **enhanced-h264ify** 等浏览器扩展屏蔽 VP9 和 AV1。
+
+---
+
+### 3. 检查实际使用的视频解码器（最关键）
+
+保持视频正常播放，另开一个 Edge 标签页打开：
+```text
+edge://media-internals
 ```
-在播放 1080p 视频时观察终端界面：
-* **软解状态**：显卡底层的 **`Video`** 引擎占用率为 **0.0%**，而整机 CPU 占用率飙高至 50%~80%，风扇轰鸣；
-* **硬解生效状态**：显卡底层的 **`Video`** 引擎会实时出现持续的动态百分比（通常为 **20% ~ 40%**），而 CPU 占用平稳低温，风扇保持静音！
+在 **Players** 页面：
+1. 找到左侧对应视频的播放器记录（通常是 `blob:https://www.youtube.com/...`）；
+2. 优先选择状态为 `kPlay` 的播放器；
+3. 查看右侧 **Properties** 和 **Events** 中的视频解码信息。
+
+#### 真实截图案例 1：当前播放器属性状态（Properties）
+![当前播放器属性状态](docs/images/01_edge_player_properties.png)
+
+**硬件解码成功时，应显示：**
+```text
+kVideoDecoderName: VaapiVideoDecoder
+kIsPlatformVideoDecoder: true
+```
+
+#### 真实截图案例 2：初始化事件流水记录（Events）
+![初始化事件流水记录](docs/images/02_edge_init_events.png)
+
+通常还会看到：
+```text
+VideoDecoderPipeline |decoder_| Initialize() successful
+Selected VaapiVideoDecoder for video decoding
+```
+这些记录说明当前播放器选择了 VA-API 视频解码器，并启用了平台硬件解码路径。
+
+**如果实际使用软件解码，则通常显示：**
+```text
+kVideoDecoderName: FFmpegVideoDecoder
+kIsPlatformVideoDecoder: false
+```
+
+---
+
+### 4. 特别检查是否发生硬解回退（最核心避坑点）
+
+这是本项目需要重点解决的问题。
+
+在未修复的旧版 i965 驱动环境中，Chromium / Edge 可能先成功初始化硬件解码器：
+```text
+00:00:00.247
+kVideoDecoderName: VaapiVideoDecoder
+kIsPlatformVideoDecoder: true
+```
+但随后因 `vaExportSurfaceHandle` 失败而抛出：
+```text
+video decoder fallback after initial decode error.
+```
+并切换到：
+```text
+kVideoDecoderName: FFmpegVideoDecoder
+kIsPlatformVideoDecoder: false
+```
+这种情况说明 **VA-API 初始化成功，但实际视频解码失败，浏览器已经回退到 CPU 软件解码**。
+
+因此，不能仅凭第一次出现的 `VaapiVideoDecoder` 就判断修复成功。
+
+#### 真实截图案例 3：持续播放数分钟后的解码状态（稳态无回退）
+![持续播放数分钟后的解码状态](docs/images/03_edge_continuous_playback.png)
+
+建议连续播放视频至少 1～5 分钟，期间或播放结束前再次检查：
+* 当前 `kVideoDecoderName` 仍为 `VaapiVideoDecoder`；
+* 当前 `kIsPlatformVideoDecoder` 仍为 `true`；
+* 事件记录中**没有**后续回退到 `FFmpegVideoDecoder`；
+* 视频正常播放，没有持续黑屏、花屏或明显解码异常。
+
+如果播放过程中解码器重新初始化，应检查重新初始化后的最终状态。
+
+---
+
+### 5. 不要误判 FFmpegAudioDecoder
+
+在 `edge://media-internals` 中还可能看到：
+```text
+kAudioDecoderName: FFmpegAudioDecoder
+kIsPlatformAudioDecoder: false
+```
+**这是音频解码信息，不代表视频硬件解码失败。**
+YouTube 的 AAC 等音频流可以使用 FFmpeg 软件解码，同时 H.264 视频流仍然由 VA-API 硬件解码。
+判断视频是否硬解，只需重点查看：
+* `kVideoDecoderName`
+* `kIsPlatformVideoDecoder`
+
+不要把 `kAudioDecoderName` 与 `kVideoDecoderName` 混淆。
+
+---
+
+### 6. 修复前后验证标准对照表
+
+| 检查项 | 修复前典型表现 | 修复成功后的表现 |
+| :--- | :--- | :--- |
+| `edge://gpu` Video Decode | Hardware accelerated | Hardware accelerated |
+| 视频编码格式 | H.264 (`avc1`) | H.264 (`avc1`) |
+| 解码器初始化 | VA-API 成功 | VA-API 成功 |
+| 首次解码 | 报错失败（Buffer 导出异常） | 正常通过 |
+| 解码器回退现象 | 发生回退（Fallback to FFmpeg） | **无任何回退** |
+| 最终 Video Decoder | `FFmpegVideoDecoder` (软解) | **`VaapiVideoDecoder` (硬解)** |
+| Platform Video Decoder | `false` | **`true`** |
+| 硬件芯片工作负载 (`intel_gpu_top`) | Video 引擎 0.0% | **Video 引擎 20%~40% 活跃** |
+
+**最终判断标准：**
+`edge://gpu` 确认硬件解码能力已启用，`edge://media-internals` 确认 H.264 视频实际使用 `VaapiVideoDecoder`，并且持续播放时没有回退到软件解码器。
+
+---
+
+### 7. 可选：验证实际性能收益
+
+硬解恢复后，还可以使用相同的视频、分辨率、帧率和测试时间，对比修复前后的 CPU 使用情况。
+建议记录：
+- 浏览器整体 CPU 使用率或累计 CPU 时间；
+- 视频分辨率和帧率；
+- YouTube 详细统计信息中的丢帧数量；
+- 是否出现卡顿、花屏或播放异常。
+
+注意，浏览器整体 CPU 开销还包括网页 JavaScript、渲染、图形合成和音频处理。因此，即使硬件视频解码已经生效，CPU 使用率也不一定非常低。
+
+---
+
+**适用范围：** 以上方法主要用于 Microsoft Edge / Chromium 在 Linux 下的 VA-API H.264 视频解码验证。对于 Intel HD Graphics 3000 等旧核显，VP9、AV1 不属于其硬件解码能力范围。
 
 ---
 

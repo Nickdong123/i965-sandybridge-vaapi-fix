@@ -13,6 +13,18 @@ Tested and verified on **Lenovo ThinkPad X220** (Core i5-2520M / HD 3000) runnin
 
 ---
 
+## 🎯 Key Takeaway: How to Spot "False Hardware Acceleration"
+
+When troubleshooting hardware decoding on vintage Linux machines, the most common trap is:
+> **`edge://gpu` shows `Video Decode: Hardware accelerated`, yet the browser secretly falls back to CPU software decoding!**
+
+* **Before Fix (False Positive)**: `edge://gpu` shows green hardware acceleration. However, inside `edge://media-internals`, VA-API fails on the first video frame, outputs `"video decoder fallback after initial decode error"`, and **silently falls back to FFmpeg software decoding**.
+* **After Fix (True Acceleration)**: Tested with 1280×720 / 1920×1080 30fps H.264 video streams. **Even after minutes of continuous playback, `kVideoDecoderName` remains solidly `VaapiVideoDecoder` with `kIsPlatformVideoDecoder: true`**, with zero dropped frames and zero fallbacks.
+
+This project provides not only the automated fix, but also an authoritative, step-by-step verification methodology to distinguish true hardware decoding from false positives.
+
+---
+
 ## 🚀 Benchmark & Performance Impact
 
 Tested with standard Big Buck Bunny H.264 test streams (120-second continuous playback).
@@ -74,16 +86,6 @@ sudo apt update
 sudo apt install -y build-essential pkg-config libva-dev libdrm-dev libx11-dev libgl1-mesa-dev vainfo
 ```
 
-On Fedora:
-```bash
-sudo dnf install -y gcc make pkgconf libva-devel libdrm-devel libX11-devel mesa-libGL-devel libva-utils
-```
-
-On Arch Linux:
-```bash
-sudo pacman -S --needed base-devel libva libdrm libx11 mesa libva-utils
-```
-
 ### 2. Download Precompiled Driver OR Build from Source
 
 #### Option A: Use Precompiled Release Binary (Fastest)
@@ -107,23 +109,14 @@ chmod +x scripts/*.sh
 ## 🖥️ Manual Command Line Execution
 
 ```bash
-# Point to your patched driver
 export LIBVA_DRIVER_NAME=i965
 export LIBVA_DRIVERS_PATH="$HOME/.local/lib/dri"
 
 # Launch Microsoft Edge
-/opt/microsoft/msedge/msedge \
-    --enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks \
-    --ignore-gpu-blocklist \
-    --enable-gpu-rasterization \
-    --enable-zero-copy
+/opt/microsoft/msedge/msedge     --enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks     --ignore-gpu-blocklist     --enable-gpu-rasterization     --enable-zero-copy
 
 # Launch Google Chrome
-/opt/google/chrome/google-chrome \
-    --enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks \
-    --ignore-gpu-blocklist \
-    --enable-gpu-rasterization \
-    --enable-zero-copy
+/opt/google/chrome/google-chrome     --enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks     --ignore-gpu-blocklist     --enable-gpu-rasterization     --enable-zero-copy
 ```
 
 ---
@@ -143,33 +136,146 @@ Detailed breakdown of command-line flags and environment variables used by the p
 
 ---
 
-## ✅ How to Verify Hardware Decoding is Truly Working
+## 🔍 How to Verify Hardware Decoding is Truly Working
 
-### ⚠️ Common Pitfall: Why `edge://gpu` is NOT Enough
-Many users check `edge://gpu` or `chrome://gpu` and see **"Video Decode: Hardware accelerated"**, assuming hardware decoding is active. **This is a false positive!**
-* `edge://gpu` only indicates that hardware acceleration is *enabled in configuration*.
-* Before applying this patch, `edge://gpu` already showed "Hardware accelerated". However, when playing an actual video, Chromium failed to call `vaExportSurfaceHandle`, silently logged `"video decoder fallback after initial decode error"`, and **fell back to CPU software decoding (`FFmpegVideoDecoder`)**—all while `edge://gpu` still claimed to be accelerated!
+> **Important:** `edge://gpu` displaying `Video Decode: Hardware accelerated` does NOT guarantee the currently playing video is actually using hardware decoding. Always verify the active decoder via `edge://media-internals`.
+
+### 1. Check Browser Hardware Acceleration Status
+
+Navigate to:
+```text
+edge://gpu
+```
+Under **Graphics Feature Status**, check the following items:
+
+| Feature | Expected Status | Purpose |
+| :--- | :--- | :--- |
+| **Video Decode** | **Hardware accelerated** | Video hardware decode capability is enabled |
+| Compositing | Hardware accelerated | GPU page compositing |
+| Canvas | Hardware accelerated | Canvas graphics acceleration |
+| Rasterization | Hardware accelerated | GPU rasterization |
+| OpenGL | Enabled | OpenGL support available |
+| WebGL | Hardware accelerated | WebGL graphics acceleration |
+
+**Note:** This only indicates that the browser recognizes hardware decoding capabilities; it does NOT ensure GPU decoding is actually used during playback.
 
 ---
 
-### The Two Authoritative Verification Methods:
+### 2. Ensure Video Stream Uses H.264 Codec
 
-#### 1. Dynamic In-Browser Verification (During Playback)
-While playing a 1080p H.264 video on Bilibili, YouTube, or a local test file:
-* **Option A**: Navigate to `edge://media-internals` in another tab. In the active player session:
-  * **`kVideoDecoderName`**: Must be **`VaapiVideoDecoder`** (if it says `FFmpegVideoDecoder`, it has fallen back to software).
-  * **`kIsPlatformVideoDecoder`**: Must be **`true`**.
-  * No `decoder fallback` warnings should be present.
-* **Option B**: Press `F12` on the video page -> open **DevTools** -> select the **Media** tab -> click the player instance -> verify `Decoder Name` is `VaapiVideoDecoder`.
+Open YouTube in Edge (test with 720p or 1080p @ 30fps). Right-click the video and select **Stats for nerds**.
+Inspect the `Codecs` field:
 
-#### 2. Hardware Silicon Activity (`intel_gpu_top`)
-Run the Intel GPU monitoring utility in your terminal:
-```bash
-sudo intel_gpu_top
+| Codec Identifier | Video Format | Intel HD Graphics 3000 (Sandy Bridge) |
+| :--- | :--- | :--- |
+| **`avc1`** | **H.264 / AVC** | **✅ Hardware Decode Supported** |
+| `vp09` | VP9 | ❌ Not supported in hardware |
+| `av01` | AV1 | ❌ Not supported in hardware |
+
+Sandy Bridge hardware only decodes H.264. Use extensions like **enhanced-h264ify** to block VP9 and AV1 so YouTube automatically delivers H.264.
+
+---
+
+### 3. Check Active Video Decoder (Most Critical)
+
+While video is actively playing, open another tab to:
+```text
+edge://media-internals
 ```
-While playing a 1080p video:
-* **Software Decode**: The GPU **`Video`** engine sits at **0.0%**, while CPU usage spikes to 50%~80% and the fan spins loudly.
-* **Patched VA-API Hardware Decode**: The GPU **`Video`** engine actively registers **20% ~ 40%** utilization, while CPU usage remains low (~15%) and the fan stays quiet.
+Under the **Players** tab:
+1. Select the active video player (e.g. `blob:https://www.youtube.com/...`);
+2. Choose the player in the `kPlay` state;
+3. Inspect **Properties** and **Events**.
+
+#### Real Screenshot 1: Active Player Properties
+![Active Player Properties](docs/images/01_edge_player_properties.png)
+
+When hardware acceleration is truly functioning:
+```text
+kVideoDecoderName: VaapiVideoDecoder
+kIsPlatformVideoDecoder: true
+```
+
+#### Real Screenshot 2: Decoder Initialization Events
+![Decoder Initialization Events](docs/images/02_edge_init_events.png)
+
+You will see:
+```text
+VideoDecoderPipeline |decoder_| Initialize() successful
+Selected VaapiVideoDecoder for video decoding
+```
+This confirms Chromium selected the VA-API hardware decoder pipeline.
+
+If software decoding is active, it displays:
+```text
+kVideoDecoderName: FFmpegVideoDecoder
+kIsPlatformVideoDecoder: false
+```
+
+---
+
+### 4. Check for Decoder Fallback (Crucial Pitfall Check)
+
+In unpatched drivers, Chromium might initially initialize VA-API:
+```text
+00:00:00.247
+kVideoDecoderName: VaapiVideoDecoder
+kIsPlatformVideoDecoder: true
+```
+And immediately log:
+```text
+video decoder fallback after initial decode error.
+```
+Switching back to software:
+```text
+kVideoDecoderName: FFmpegVideoDecoder
+kIsPlatformVideoDecoder: false
+```
+This indicates VA-API initialization passed, but actual frame decoding failed, silently falling back to CPU.
+
+#### Real Screenshot 3: Sustained Playback After 4+ Minutes (Zero Fallback)
+![Sustained Playback After 4+ Minutes](docs/images/03_edge_continuous_playback.png)
+
+Play the video for at least 1 to 5 minutes and confirm:
+* `kVideoDecoderName` remains **`VaapiVideoDecoder`**;
+* `kIsPlatformVideoDecoder` remains **`true`**;
+* No `decoder fallback` warnings exist in the event log;
+* Playback remains smooth without screen flickering or audio desync.
+
+---
+
+### 5. Do Not Confuse with FFmpegAudioDecoder
+
+In `edge://media-internals`, you may see:
+```text
+kAudioDecoderName: FFmpegAudioDecoder
+kIsPlatformAudioDecoder: false
+```
+**This is audio decoding and does NOT indicate video hardware decode failure.** YouTube audio streams (AAC/Opus) are decoded via software by design, while H.264 video frames are decoded by the VA-API hardware pipeline. Focus strictly on `kVideoDecoderName` and `kIsPlatformVideoDecoder`.
+
+---
+
+### 6. Verification Checklist: Before vs. After Patch
+
+| Diagnostic Check | Before Patch (Unfixed) | After Patch (Fixed) |
+| :--- | :--- | :--- |
+| `edge://gpu` Video Decode | Hardware accelerated (Misleading) | Hardware accelerated |
+| Video Stream Codec | H.264 (`avc1`) | H.264 (`avc1`) |
+| Decoder Initialization | VA-API succeeds | VA-API succeeds |
+| First Frame Decode | Fails on surface export | Succeeds via DRM Prime |
+| Decoder Fallback | **Falls back to FFmpeg** | **Zero fallback** |
+| Active Video Decoder | `FFmpegVideoDecoder` (Software) | **`VaapiVideoDecoder` (Hardware)** |
+| Platform Video Decoder | `false` | **`true`** |
+| GPU Silicon Load (`intel_gpu_top`) | Video Engine 0.0% | **Video Engine 20%~40% Active** |
+
+---
+
+### 7. Optional: Measuring Real-World Performance Gains
+
+After hardware decode is restored, run identical 1080p test videos to compare:
+- Overall CPU utilization / cumulative CPU seconds;
+- Dropped frames in YouTube Stats for Nerds (should be 0);
+- System thermals and fan noise.
 
 ---
 
