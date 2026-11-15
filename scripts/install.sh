@@ -6,6 +6,7 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 OUT_DIR="$REPO_ROOT/out"
 DRIVER_SO="$OUT_DIR/i965_drv_video.so"
 APP_DIR="$HOME/.local/share/applications"
+INSTALL_LIB_DIR="$HOME/.local/lib/dri"
 
 echo "=== Installing i965 Sandy Bridge VA-API Fix ==="
 
@@ -15,7 +16,8 @@ if [ ! -f "$DRIVER_SO" ]; then
     "$SCRIPT_DIR/build.sh"
 fi
 
-mkdir -p "$APP_DIR"
+mkdir -p "$APP_DIR" "$INSTALL_LIB_DIR"
+cp -v "$DRIVER_SO" "$INSTALL_LIB_DIR/i965_drv_video.so"
 
 install_launcher() {
     local browser_name="$1"
@@ -30,7 +32,7 @@ Version=1.0
 Name=${browser_name^} (VA-API Patched)
 GenericName=Web Browser
 Comment=Access the Internet with VA-API Hardware Video Decoding (Intel Sandy Bridge)
-Exec=env LIBVA_DRIVER_NAME=i965 LIBVA_DRIVERS_PATH=${OUT_DIR} ${exec_cmd} --enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks --ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy %U
+Exec=env LIBVA_DRIVER_NAME=i965 LIBVA_DRIVERS_PATH=${INSTALL_LIB_DIR} ${exec_cmd} --enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks --ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy %U
 Terminal=false
 Icon=${icon_name}
 Type=Application
@@ -40,11 +42,11 @@ Actions=new-window;new-private-window;
 
 [Desktop Action new-window]
 Name=New Window
-Exec=env LIBVA_DRIVER_NAME=i965 LIBVA_DRIVERS_PATH=${OUT_DIR} ${exec_cmd} --enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks --ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy
+Exec=env LIBVA_DRIVER_NAME=i965 LIBVA_DRIVERS_PATH=${INSTALL_LIB_DIR} ${exec_cmd} --enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks --ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy
 
 [Desktop Action new-private-window]
 Name=New Private Window
-Exec=env LIBVA_DRIVER_NAME=i965 LIBVA_DRIVERS_PATH=${OUT_DIR} ${exec_cmd} --enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks --ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy --inprivate
+Exec=env LIBVA_DRIVER_NAME=i965 LIBVA_DRIVERS_PATH=${INSTALL_LIB_DIR} ${exec_cmd} --enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks --ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy --inprivate
 DESK
     chmod +x "$desktop_file"
 }
@@ -75,8 +77,5 @@ fi
 
 echo ""
 echo "=== Installation Complete! ==="
-echo "Launchers have been added to your application menu:"
-echo "  - Microsoft Edge (VA-API Patched)"
-echo ""
-echo "You can launch directly from your application launcher or run:"
-echo "  env LIBVA_DRIVER_NAME=i965 LIBVA_DRIVERS_PATH=$OUT_DIR /opt/microsoft/msedge/msedge --enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks --ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy"
+echo "Driver installed permanently to: $INSTALL_LIB_DIR/i965_drv_video.so"
+echo "Launchers have been added to your application menu."
