@@ -128,26 +128,48 @@ export LIBVA_DRIVERS_PATH="$HOME/.local/lib/dri"
 
 ---
 
-## ✅ Verification & Diagnosis
+## ⚙️ Launch Flags Explained
 
-### Check with `vainfo`
+Detailed breakdown of command-line flags and environment variables used by the patched launchers:
+
+| Flag / Variable | Purpose |
+| :--- | :--- |
+| `LIBVA_DRIVER_NAME=i965` | Forces loading the classic open-source i965 driver instead of incompatible iHD. |
+| `LIBVA_DRIVERS_PATH=$HOME/.local/lib/dri` | Directs libva to load the patched driver from user space without root or overwriting system files. |
+| `--enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks` | Enables modern Linux GL/DMA-BUF zero-copy video decode pipeline and bypasses driver blacklist. |
+| `--ignore-gpu-blocklist` | Overrides Chromium's internal GPU blocklist for legacy 2011 Sandy Bridge hardware. |
+| `--enable-gpu-rasterization` | Offloads 2D page drawing and CSS rasterization to the GPU. |
+| `--enable-zero-copy` | Shares decoded video GPU texture buffers directly with the compositor, eliminating CPU memory copies. |
+
+---
+
+## ✅ How to Verify Hardware Decoding is Truly Working
+
+### ⚠️ Common Pitfall: Why `edge://gpu` is NOT Enough
+Many users check `edge://gpu` or `chrome://gpu` and see **"Video Decode: Hardware accelerated"**, assuming hardware decoding is active. **This is a false positive!**
+* `edge://gpu` only indicates that hardware acceleration is *enabled in configuration*.
+* Before applying this patch, `edge://gpu` already showed "Hardware accelerated". However, when playing an actual video, Chromium failed to call `vaExportSurfaceHandle`, silently logged `"video decoder fallback after initial decode error"`, and **fell back to CPU software decoding (`FFmpegVideoDecoder`)**—all while `edge://gpu` still claimed to be accelerated!
+
+---
+
+### The Two Authoritative Verification Methods:
+
+#### 1. Dynamic In-Browser Verification (During Playback)
+While playing a 1080p H.264 video on Bilibili, YouTube, or a local test file:
+* **Option A**: Navigate to `edge://media-internals` in another tab. In the active player session:
+  * **`kVideoDecoderName`**: Must be **`VaapiVideoDecoder`** (if it says `FFmpegVideoDecoder`, it has fallen back to software).
+  * **`kIsPlatformVideoDecoder`**: Must be **`true`**.
+  * No `decoder fallback` warnings should be present.
+* **Option B**: Press `F12` on the video page -> open **DevTools** -> select the **Media** tab -> click the player instance -> verify `Decoder Name` is `VaapiVideoDecoder`.
+
+#### 2. Hardware Silicon Activity (`intel_gpu_top`)
+Run the Intel GPU monitoring utility in your terminal:
 ```bash
-LIBVA_DRIVER_NAME=i965 LIBVA_DRIVERS_PATH=$HOME/.local/lib/dri vainfo
+sudo intel_gpu_top
 ```
-Output should contain:
-```text
-va_openDriver() returns 0
-VAProfileH264Main               :	VAEntrypointVLD
-VAProfileH264High               :	VAEntrypointVLD
-```
-
-### Check in Browser
-1. Visit `edge://gpu` or `chrome://gpu`:
-   - **Video Decode**: `Hardware accelerated`
-2. Play any 1080p H.264 video on YouTube or Bilibili.
-3. Open `edge://media-internals` or DevTools (Media tab):
-   - **kVideoDecoderName**: `VaapiVideoDecoder`
-4. Run `intel_gpu_top` in terminal to observe real-time GPU hardware decoding activity.
+While playing a 1080p video:
+* **Software Decode**: The GPU **`Video`** engine sits at **0.0%**, while CPU usage spikes to 50%~80% and the fan spins loudly.
+* **Patched VA-API Hardware Decode**: The GPU **`Video`** engine actively registers **20% ~ 40%** utilization, while CPU usage remains low (~15%) and the fan stays quiet.
 
 ---
 

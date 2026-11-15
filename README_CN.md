@@ -107,18 +107,48 @@ export LIBVA_DRIVERS_PATH="$HOME/.local/lib/dri"
 
 ---
 
-## ✅ 验证是否成功生效
+## ⚙️ 启动参数深度解析
 
-1. `vainfo` 检查：
+启动命令中各项关键参数的作用如下：
+
+| 参数 / 环境变量 | 作用解析 |
+| :--- | :--- |
+| `LIBVA_DRIVER_NAME=i965` | 强制指定使用经典开源 i965 显卡驱动，避免系统尝试加载不兼容的 iHD 驱动。 |
+| `LIBVA_DRIVERS_PATH=$HOME/.local/lib/dri` | 定向加载位于用户目录的修补驱动共享库，实现免 root、免覆盖系统的安全隔离加载。 |
+| `--enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks` | 启用现代 Linux DMA-BUF 纹理共享硬解管线，并跳过 Chromium 对旧版驱动版本的拦截。 |
+| `--ignore-gpu-blocklist` | 绕过 Chromium 内置的旧硬件黑名单（Sandy Bridge 于 2011 年发布，默认会被部分特性软拉黑）。 |
+| `--enable-gpu-rasterization` | 开启网页 2D 绘图与 CSS 渲染的 GPU 硬件光栅化，减轻 CPU 界面绘制压力。 |
+| `--enable-zero-copy` | 开启零拷贝显存直通机制，解码后的显存纹理直接交给合成器，避免在内存与显存之间二次搬运。 |
+
+---
+
+## ✅ 如何准确验证硬件解码已真实生效？
+
+### ⚠️ 重要避坑警示：为什么不能只看 `edge://gpu`？
+很多用户会查看 `edge://gpu` 中的 **Video Decode: Hardware accelerated**，并误以为这就是硬解生效的证据。**这是经典误区！**
+* **真相**：`edge://gpu` 仅表示浏览器配置“**允许尝试硬件解码**”。在修复之前，该页面就已经是绿色的 `Hardware accelerated`；
+* **致命回退**：在未打补丁时，当您真正播放视频时，Chromium 会在底层尝试调用 `vaExportSurfaceHandle`，失败后在后台静默抛出错误：`"video decoder fallback after initial decode error"`，并**偷偷降级回 CPU 软解（FFmpegVideoDecoder）**，此时 `edge://gpu` 依然会显示加速！
+
+---
+
+### 真正的两大权威黄金判定标准：
+
+#### 1. 浏览器内核心态（播放时动态检查）
+在 Edge 播放任意 1080p H.264 视频（如 Bilibili 或 YouTube）时：
+* **方式 A（直观页面）**：在地址栏输入 `edge://media-internals`，在当前活跃的播放器列表中查看：
+  * **`kVideoDecoderName`** 必须是 **`VaapiVideoDecoder`**（若为 `FFmpegVideoDecoder` 则说明退化为软解）；
+  * **`kIsPlatformVideoDecoder`** 必须为 **`true`**；
+  * 列表中**不得出现**任何 `decoder fallback` 警告。
+* **方式 B（开发者工具）**：在播放网页按 `F12` 打开 DevTools -> 切换到 `Media` 面板 -> 点击左侧播放实例 -> 查看 `Decoder Name` 是否为 `VaapiVideoDecoder`。
+
+#### 2. 硬件芯片物理工作负载（底层铁证）
+在终端中执行显卡硬件监控工具：
 ```bash
-LIBVA_DRIVER_NAME=i965 LIBVA_DRIVERS_PATH=$HOME/.local/lib/dri vainfo
+sudo intel_gpu_top
 ```
-确认包含 `VAProfileH264Main : VAEntrypointVLD`。
-
-2. 浏览器内部验证：
-- 访问 `edge://gpu`，确认 **Video Decode** 显示为 `Hardware accelerated`；
-- 播放 1080p H.264 视频，访问 `edge://media-internals` 或 F12 Media 面板，确认 **kVideoDecoderName** 为 **`VaapiVideoDecoder`**；
-- 终端运行 `intel_gpu_top`，观察显卡 Video 引擎硬件实时解码。
+在播放 1080p 视频时观察终端界面：
+* **软解状态**：显卡底层的 **`Video`** 引擎占用率为 **0.0%**，而整机 CPU 占用率飙高至 50%~80%，风扇轰鸣；
+* **硬解生效状态**：显卡底层的 **`Video`** 引擎会实时出现持续的动态百分比（通常为 **20% ~ 40%**），而 CPU 占用平稳低温，风扇保持静音！
 
 ---
 
