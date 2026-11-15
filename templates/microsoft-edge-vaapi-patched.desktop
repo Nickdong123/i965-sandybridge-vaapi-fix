@@ -1,0 +1,20 @@
+[Desktop Entry]
+Version=1.0
+Name=Microsoft Edge (VA-API Patched)
+GenericName=Web Browser
+Comment=Access the Internet with VA-API Hardware Decoding (ThinkPad X220 SNB GT2)
+Exec=env LIBVA_DRIVER_NAME=i965 LIBVA_DRIVERS_PATH=/home/nam/src/x220-edge-vaapi-fix/out /opt/microsoft/msedge/msedge --enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks --ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy %U
+Terminal=false
+Icon=microsoft-edge
+Type=Application
+Categories=Network;WebBrowser;
+MimeType=text/html;text/xml;application/xhtml+xml;application/xml;application/vnd.mozilla.xul+xml;application/rss+xml;application/rdf+xml;image/gif;image/jpeg;image/png;x-scheme-handler/http;x-scheme-handler/https;
+Actions=new-window;new-private-window;
+
+[Desktop Action new-window]
+Name=New Window
+Exec=env LIBVA_DRIVER_NAME=i965 LIBVA_DRIVERS_PATH=/home/nam/src/x220-edge-vaapi-fix/out /opt/microsoft/msedge/msedge --enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks --ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy
+
+[Desktop Action new-private-window]
+Name=New InPrivate Window
+Exec=env LIBVA_DRIVER_NAME=i965 LIBVA_DRIVERS_PATH=/home/nam/src/x220-edge-vaapi-fix/out /opt/microsoft/msedge/msedge --enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks --ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy --inprivate

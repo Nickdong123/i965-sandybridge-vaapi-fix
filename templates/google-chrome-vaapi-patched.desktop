@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Name=Google Chrome (VA-API Patched)
+GenericName=Web Browser
+Comment=Access the Internet with VA-API Hardware Decoding (Sandy Bridge Gen6 GT2)
+Exec=env LIBVA_DRIVER_NAME=i965 LIBVA_DRIVERS_PATH=__INSTALL_DIR__/out /opt/google/chrome/google-chrome --enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks --ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy %U
+Terminal=false
+Icon=google-chrome
+Type=Application
+Categories=Network;WebBrowser;

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Name=Chromium (VA-API Patched)
+GenericName=Web Browser
+Comment=Access the Internet with VA-API Hardware Decoding (Sandy Bridge Gen6 GT2)
+Exec=env LIBVA_DRIVER_NAME=i965 LIBVA_DRIVERS_PATH=__INSTALL_DIR__/out chromium --enable-features=AcceleratedVideoDecodeLinuxGL,VaapiIgnoreDriverChecks --ignore-gpu-blocklist --enable-gpu-rasterization --enable-zero-copy %U
+Terminal=false
+Icon=chromium
+Type=Application
+Categories=Network;WebBrowser;
